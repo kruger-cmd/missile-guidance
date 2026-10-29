@@ -74,3 +74,33 @@ class KalmanTracker:
     def estimate(self) -> np.ndarray:
         """Return estimated position."""
         return self.state[:3]
+
+
+class TrackToTargetLoop:
+    """Seeker + tracker + guidance closed loop."""
+
+    def __init__(self, seeker: SeekerModel, tracker: KalmanTracker, guidance) -> None:
+        self.seeker = seeker
+        self.tracker = tracker
+        self.guidance = guidance
+        self.measurement_count = 0
+        self.update_count = 0
+
+    def step(self, true_target_pos: np.ndarray, missile_pos: np.ndarray, dt: float) -> np.ndarray:
+        """One tick: measure, track, guide."""
+        los = true_target_pos - missile_pos
+        los_norm = np.linalg.norm(los)
+        if los_norm < 1e-6:
+            return np.zeros(3)
+
+        measurement = self.seeker.measure(true_target_pos, los)
+        if measurement is not None:
+            self.measurement_count += 1
+            self.tracker.predict(dt=dt)
+            self.tracker.update(measurement)
+            self.update_count += 1
+
+        estimated_pos = self.tracker.estimate()
+        estimated_target = type("TargetState", (), {"position": estimated_pos, "velocity": np.array([100.0, 0.0, 0.0]), "acceleration": np.zeros(3)})()
+        missile_state = type("MissileState", (), {"position": missile_pos, "velocity": np.array([200.0, 0.0, 0.0]), "acceleration": np.zeros(3)})()
+        return self.guidance.compute_acceleration(missile_state, estimated_target, method="augmented")
